@@ -1,9 +1,9 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.models import User
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from .models import Post, Room, RoomFile
+from .models import Post, Room, RoomFile, RoomMessage
 from django.db.models import Q
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -123,9 +123,11 @@ def room_detail(request, room_id):
     if request.user not in room.members.all():
         raise PermissionDenied
     files = RoomFile.objects.filter(room=room)
+    messages = RoomMessage.objects.filter(room=room).order_by('-timestamp')  # Get chat messages
     context = {
         'room': room,
-        'files': files
+        'files': files,
+        'messages': messages  # Pass messages to template
     }
     return render(request, 'blog/room_detail.html', context)
 
@@ -149,3 +151,21 @@ def upload_file(request, room_id):
 def user_rooms(request):
     rooms = request.user.rooms_joined.all()
     return render(request, 'blog/user_rooms.html', {'rooms': rooms})
+
+@login_required
+def send_message(request, room_id):
+    room = get_object_or_404(Room, room_id=room_id)
+    if request.user not in room.members.all():
+        messages.error(request, "You are not a member of this room.")
+        return redirect('room-detail', room_id=room.room_id)
+
+    if request.method == 'POST':
+        content = request.POST.get('content')
+        message = RoomMessage.objects.create(room=room, sender=request.user, content=content)
+        
+        # Return JSON response with the new message
+        return JsonResponse({
+            'user': message.sender.username,
+            'message': message.content,
+            'timestamp': message.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        })
